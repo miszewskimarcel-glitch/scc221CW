@@ -1,8 +1,13 @@
 import csv
 import mysql.connector
-import plotly.express as px
+import plotly.graph_objects as go
+import plotly.io as pio
 
 DB_NAME = "cs_tournament"
+
+# Helps on lab machines: opens plots in your default browser
+pio.renderers.default = "browser"
+
 
 def connect():
     return mysql.connector.connect(
@@ -11,10 +16,12 @@ def connect():
         password=""
     )
 
+
 def setup_database(cur):
     cur.execute(f"DROP DATABASE IF EXISTS {DB_NAME}")
     cur.execute(f"CREATE DATABASE {DB_NAME}")
     cur.execute(f"USE {DB_NAME}")
+
 
 def create_tables(cur):
     cur.execute("""
@@ -72,6 +79,7 @@ def create_tables(cur):
         )
     """)
 
+
 def load_teams(cur, filename="teams.csv"):
     rows = []
     with open(filename, newline="", encoding="utf-8") as f:
@@ -86,6 +94,7 @@ def load_teams(cur, filename="teams.csv"):
         "INSERT INTO Team (teamID, name, region, ranking) VALUES (%s, %s, %s, %s)",
         rows
     )
+
 
 def load_players(cur, filename="players.csv"):
     rows = []
@@ -107,6 +116,7 @@ def load_players(cur, filename="players.csv"):
            VALUES (%s, %s, %s, %s, %s, %s, %s)""",
         rows
     )
+
 
 def load_matches(cur, filename="matches.csv"):
     rows = []
@@ -133,6 +143,7 @@ def load_matches(cur, filename="matches.csv"):
         rows
     )
 
+
 def load_performance(cur, filename="performance.csv"):
     rows = []
     with open(filename, newline="", encoding="utf-8") as f:
@@ -152,7 +163,8 @@ def load_performance(cur, filename="performance.csv"):
            VALUES (%s, %s, %s, %s, %s, %s, %s)""",
         rows
     )
-    
+
+
 def q_top_players(cur, limit=10):
     cur.execute("""
         SELECT
@@ -166,6 +178,7 @@ def q_top_players(cur, limit=10):
     """, (limit,))
     return cur.fetchall()
 
+
 def q_avg_rating_by_map(cur):
     cur.execute("""
         SELECT
@@ -177,6 +190,7 @@ def q_avg_rating_by_map(cur):
         ORDER BY avg_rating DESC
     """)
     return cur.fetchall()
+
 
 def q_team_winrates(cur):
     cur.execute("""
@@ -197,6 +211,7 @@ def q_team_winrates(cur):
         ORDER BY win_rate DESC, wins DESC;
     """)
     return cur.fetchall()
+
 
 def q_best_player_per_country(cur):
     cur.execute("""
@@ -243,56 +258,112 @@ def q_player_count_by_country(cur):
     """)
     return cur.fetchall()
 
+
+# ------------------------
+# Plotting (NO plotly.express)
+# ------------------------
+
 def plot_top_players(rows):
-    data = {"Player": [r[0] for r in rows], "Avg Rating": [float(r[1]) for r in rows]}
-    fig = px.bar(data, x="Player", y="Avg Rating", title="Top Players by Average Rating", text="Avg Rating")
-    fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+    players = [r[0] for r in rows]
+    avg = [float(r[1]) for r in rows]
+
+    fig = go.Figure(go.Bar(
+        x=players,
+        y=avg,
+        text=[f"{v:.2f}" for v in avg],
+        textposition="outside"
+    ))
+    fig.update_layout(
+        title="Top Players by Average Rating",
+        xaxis_title="Player",
+        yaxis_title="Avg Rating"
+    )
     fig.show()
+
 
 def plot_rating_by_map(rows):
-    data = {"Map": [r[0] for r in rows], "Avg Rating": [float(r[1]) for r in rows]}
-    fig = px.bar(data, x="Map", y="Avg Rating", title="Average Rating by Map", text="Avg Rating")
-    fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+    maps = [r[0] for r in rows]
+    avg = [float(r[1]) for r in rows]
+
+    fig = go.Figure(go.Bar(
+        x=maps,
+        y=avg,
+        text=[f"{v:.2f}" for v in avg],
+        textposition="outside"
+    ))
+    fig.update_layout(
+        title="Average Rating by Map",
+        xaxis_title="Map",
+        yaxis_title="Avg Rating"
+    )
     fig.show()
+
 
 def plot_team_winrates(rows):
-    data = {"Team": [r[0] for r in rows], "Win Rate (%)": [float(r[3]) for r in rows]}
-    fig = px.bar(data, x="Team", y="Win Rate (%)", title="Team Win Rates", text="Win Rate (%)")
-    fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+    teams = [r[0] for r in rows]
+    win_rates = [float(r[3]) for r in rows]
+
+    fig = go.Figure(go.Bar(
+        x=teams,
+        y=win_rates,
+        text=[f"{v:.2f}" for v in win_rates],
+        textposition="outside"
+    ))
+    fig.update_layout(
+        title="Team Win Rates",
+        xaxis_title="Team",
+        yaxis_title="Win Rate (%)"
+    )
     fig.show()
 
+
 def plot_best_country_players(rows):
-    data = {
-        "Country": [r[0] for r in rows],
-        "Player": [r[1] for r in rows],
-        "Avg Rating": [float(r[2]) for r in rows],
-        "Total Kills": [int(r[3]) for r in rows]
-    }
-    fig = px.bar(
-        data,
-        x="Country",
-        y="Avg Rating",
+    countries = [r[0] for r in rows]
+    players = [r[1] for r in rows]
+    avg = [float(r[2]) for r in rows]
+    kills = [int(r[3]) for r in rows]
+
+    hover = [
+        f"Player: {p}<br>Avg Rating: {a:.2f}<br>Total Kills: {k}"
+        for p, a, k in zip(players, avg, kills)
+    ]
+
+    fig = go.Figure(go.Bar(
+        x=countries,
+        y=avg,
+        text=[f"{v:.2f}" for v in avg],
+        textposition="outside",
+        hovertext=hover,
+        hoverinfo="text"
+    ))
+    fig.update_layout(
         title="Best Player per Country (by Avg Rating)",
-        text="Avg Rating",
-        hover_data=["Player", "Total Kills"]
+        xaxis_title="Country",
+        yaxis_title="Avg Rating"
     )
-    fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
     fig.show()
+
 
 def plot_country_player_ratio(rows, top_n=10):
     rows = [(c, int(n)) for c, n in rows]
     top = rows[:top_n]
     other = sum(n for _, n in rows[top_n:])
 
-    countries = [c for c, _ in top]
-    counts = [n for _, n in top]
-    if other > 0:
-        countries.append("Other")
-        counts.append(other)
+    labels = [c for c, _ in top]
+    values = [n for _, n in top]
 
-    data = {"Country": countries, "Players": counts}
-    fig = px.pie(data, names="Country", values="Players", title="Player Ratio by Country")
+    if other > 0:
+        labels.append("Other")
+        values.append(other)
+
+    fig = go.Figure(go.Pie(
+        labels=labels,
+        values=values,
+        textinfo="label+percent"
+    ))
+    fig.update_layout(title="Player Ratio by Country")
     fig.show()
+
 
 def main():
     conn = connect()
@@ -321,6 +392,7 @@ def main():
 
     cur.close()
     conn.close()
+
 
 if __name__ == "__main__":
     main()

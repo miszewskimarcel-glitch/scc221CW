@@ -8,11 +8,11 @@ pio.renderers.default = "browser"
 DB_NAME = "cs_tournament"
 
 
-def create_mysql_connection(host, user, password):
+def connect():
     return mysql.connector.connect(
-        host=host,
-        user=user,
-        password=password
+        host="localhost",
+        user="cwuser",
+        password="cwpassword"
     )
 
 
@@ -94,17 +94,54 @@ def create_tables(conn):
     cur.close()
 
 
-def populate_from_csv(conn, table, columns, csv_file):
+def load_teams(conn):
     cur = conn.cursor()
-    placeholders = ",".join(["%s"] * len(columns))
-    query = f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})"
-
-    with open(csv_file, newline="", encoding="utf-8") as f:
+    with open("teams.csv", newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
         next(reader)
         for row in reader:
-            cur.execute(query, row)
+            cur.execute(
+                "INSERT INTO Team VALUES (%s,%s,%s,%s)", row
+            )
+    conn.commit()
+    cur.close()
 
+
+def load_players(conn):
+    cur = conn.cursor()
+    with open("players.csv", newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader)
+        for row in reader:
+            cur.execute(
+                "INSERT INTO Player VALUES (%s,%s,%s,%s,%s,%s,%s)", row
+            )
+    conn.commit()
+    cur.close()
+
+
+def load_matches(conn):
+    cur = conn.cursor()
+    with open("matches.csv", newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader)
+        for row in reader:
+            cur.execute(
+                "INSERT INTO `Match` VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", row
+            )
+    conn.commit()
+    cur.close()
+
+
+def load_performance(conn):
+    cur = conn.cursor()
+    with open("performance.csv", newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader)
+        for row in reader:
+            cur.execute(
+                "INSERT INTO Performance VALUES (%s,%s,%s,%s,%s,%s,%s)", row
+            )
     conn.commit()
     cur.close()
 
@@ -124,14 +161,13 @@ def q_top_players(conn):
     return rows
 
 
-def q_avg_rating_by_map(conn):
+def q_decisive_matches(conn):
     cur = conn.cursor()
     cur.execute("""
-        SELECT m.map, AVG(perf.rating)
-        FROM `Match` m
-        JOIN Performance perf ON m.matchID = perf.matchID
-        GROUP BY m.map
-        ORDER BY AVG(perf.rating) DESC
+        SELECT matchID, map, team1_score, team2_score
+        FROM `Match`
+        WHERE ABS(team1_score - team2_score) >= 2
+        ORDER BY matchID;
     """)
     rows = cur.fetchall()
     cur.close()
@@ -143,15 +179,22 @@ def q_team_winrates(conn):
     cur.execute("""
         SELECT
             t.name,
-            ROUND(100 * SUM(CASE WHEN s.team_score > s.opp_score THEN 1 ELSE 0 END) / COUNT(*), 2)
-        FROM (
-            SELECT team1ID AS teamID, team1_score AS team_score, team2_score AS opp_score FROM `Match`
-            UNION ALL
-            SELECT team2ID AS teamID, team2_score AS team_score, team1_score AS opp_score FROM `Match`
-        ) s
-        JOIN Team t ON t.teamID = s.teamID
+            ROUND(
+                100 * SUM(
+                    CASE
+                        WHEN (t.teamID = m.team1ID AND m.team1_score > m.team2_score)
+                          OR (t.teamID = m.team2ID AND m.team2_score > m.team1_score)
+                        THEN 1
+                        ELSE 0
+                    END
+                ) / COUNT(*),
+                2
+            )
+        FROM Team t
+        JOIN `Match` m
+            ON t.teamID = m.team1ID OR t.teamID = m.team2ID
         GROUP BY t.teamID, t.name
-        ORDER BY 2 DESC
+        ORDER BY 2 DESC;
     """)
     rows = cur.fetchall()
     cur.close()
@@ -173,12 +216,7 @@ def q_player_count_by_country(conn):
 
 
 def plot_bar(x, y, title, xlab, ylab):
-    fig = go.Figure(go.Bar(
-        x=x,
-        y=y,
-        text=[f"{v:.2f}" if isinstance(v, float) else v for v in y],
-        textposition="outside"
-    ))
+    fig = go.Figure(go.Bar(x=x, y=y, text=y, textposition="outside"))
     fig.update_layout(title=title, xaxis_title=xlab, yaxis_title=ylab)
     fig.show()
 
@@ -190,38 +228,38 @@ def plot_pie(labels, values, title):
 
 
 if __name__ == "__main__":
-    conn = create_mysql_connection("", "", "")
+    print("Connecting to database...")
+    conn = connect()
 
     create_database(conn, DB_NAME)
     use_database(conn, DB_NAME)
     drop_tables(conn)
     create_tables(conn)
 
-    populate_from_csv(conn, "Team",
-        ["teamID","name","region","ranking"], "teams.csv")
-    populate_from_csv(conn, "Player",
-        ["playerID","teamID","username","country","role","details","overall_rating"], "players.csv")
-    populate_from_csv(conn, "`Match`",
-        ["matchID","map","date","duration","type_info","match_type","stage",
-         "team1ID","team2ID","team1_score","team2_score"], "matches.csv")
-    populate_from_csv(conn, "Performance",
-        ["matchID","playerID","kills","deaths","assists","rating","details"], "performance.csv")
+    print("Loading data from CSV files...")
+    load_teams(conn)
+    load_players(conn)
+    load_matches(conn)
+    load_performance(conn)
 
+    print("Running queries...")
     top_players = q_top_players(conn)
-    avg_map = q_avg_rating_by_map(conn)
+    decisive = q_decisive_matches(conn)
     team_win = q_team_winrates(conn)
     country_counts = q_player_count_by_country(conn)
 
-    plot_bar([r[0] for r in top_players], [r[1] for r in top_players],
-             "Top Players by Avg Rating", "Player", "Avg Rating")
+    print("Plotting results...")
+    plot_bar([r[0] for r in top_players],[r[1] for r in top_players],"Top Players by Avg Rating","Player","Avg Rating")
 
-    plot_bar([r[0] for r in avg_map], [r[1] for r in avg_map],
-             "Average Rating by Map", "Map", "Avg Rating")
-
-    plot_bar([r[0] for r in team_win], [r[1] for r in team_win],
-             "Team Win Rates", "Team", "Win Rate (%)")
-
-    plot_pie([r[0] for r in country_counts], [r[1] for r in country_counts],
-             "Player Ratio by Country")
+    labels = []
+    diffs = []
+    for r in decisive:
+        labels.append(f"M{r[0]} ({r[1]})")
+        diffs.append(abs(int(r[2]) - int(r[3])))
+    plot_bar(labels,diffs,"Decisive Matches (Score Difference >= 2)","Match","Score Difference")
+    
+    plot_bar([r[0] for r in team_win],[r[1] for r in team_win],"Team Win Rates","Team","Win Rate (%)")
+    plot_pie([r[0] for r in country_counts],[r[1] for r in country_counts],"Player Ratio by Country")
 
     conn.close()
+    print("Done.")

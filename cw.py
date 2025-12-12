@@ -4,8 +4,6 @@ import plotly.graph_objects as go
 import plotly.io as pio
 
 DB_NAME = "cs_tournament"
-
-# Helps on lab machines: opens plots in your default browser
 pio.renderers.default = "browser"
 
 
@@ -257,11 +255,6 @@ def q_player_count_by_country(cur):
         ORDER BY player_count DESC, country ASC;
     """)
     return cur.fetchall()
-
-
-# ------------------------
-# Plotting (NO plotly.express)
-# ------------------------
 
 def plot_top_players(rows):
     players = [r[0] for r in rows]
